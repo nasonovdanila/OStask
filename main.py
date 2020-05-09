@@ -1,30 +1,32 @@
 import vk_api
+import time
+import json
 
-class Vk:
-    vkSes = 0
+if __name__ == "__main__":
 
-    def Vk_start(self,login,password):
-        self.vkSes = vk_api.VkApi(login,password)
-        self.vkSes.auth()
-        vk = self.vkSes.get_api()
-        if vk:
-            print("All good")
-        else:
-            print("Shit")
-        pass
+    with open('./.creds.txt','r') as cred:
+        cred = cred.read().splitlines()
+        client = vk_api.VkApi(cred[0], cred[1])
+        try:
+            client.auth()
+        except Exception as e:
+            print(e)
+
+    try:
+        news = client.method("newsfeed.get", {"count":100,"filters":['post']})
+    except Exception as e:
+        print(e)
+
+    news_parsed = []
+
+    for new in news['items']:
+        new_pics = []
+        if 'attachments' in new:
+                for attachment in new['attachments']:
+                    if attachment['type'] == 'photo':
+                        new_pics.append(attachment['photo']['sizes'][0]['url'])
+        new_url = f'https://vk.com/feed?w=wall{new["source_id"]}_{new["post_id"]}'
+        news_parsed.append({'id': new['post_id'], 'text': new['text'], 'pics' : new_pics, 'url' : new_url})
     
-    def Vk_get_fullname(self):
-        vkinf = self.vkSes.method("account.getProfileInfo")
-        bday = vkinf['bdate'].split(".") [2]
-        if (int) (bday) == 2001:
-            print(vkinf['last_name'] + " " + vkinf['first_name'] + " is born " + vkinf['bdate'])
-        elif (int) (bday) == 1999:
-            print("He is lie")
-
-
-test = Vk()
-login = input("Enter login : ")
-passw = input("Enter pass : ")
-test.Vk_start(login, passw)
-
-test.Vk_get_fullname()
+    with open('./news_parsed.json','w+') as news_json:
+        news_json.write(json.dumps(news_parsed, indent=1))

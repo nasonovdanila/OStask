@@ -1,0 +1,5 @@
+*.creds.txt
+*vk_config.v2.json
+*old.py
+*news_parsed.json
+*123.py
