@@ -2,10 +2,10 @@ import vk_api
 from time import sleep
 import json
 from multiprocessing import Process, Pipe, current_process
-from threading import Thread
 import os.path
 import psutil
 import timeit
+import sqlalchemy
 
 def listener(type, ppid,chld_pipe,isTest):
     if psutil.pid_exists(ppid) and not isTest:
@@ -49,7 +49,7 @@ def parse_news(new: dict, type: int, chld_pipe, isTest):
         if isTest:
             os.remove(f'./news_type{type}.json')
     else:
-        sleep(300)
+        sleep(0.002)
         current_process().name = 'Type 3'
     
     listen.terminate()
@@ -107,47 +107,51 @@ if __name__ == "__main__":
         else:
             if new_time > wait_time: wait_time = new_time
 
+    a = input("Распарсить новости ? (Y/n): ")
+    if download == 'Y' or download == '':
+        base = 0
+        for new in news_parsed:
+            print(f"News num {new['id']}")
+            for num in range(4):
+                pipes.append(Pipe())
+                type_num = (base + num) % 4 
+                print(f'Process {num} doing typr {type_num}')
+                processes.append(Process(target=parse_news, args=(new, type_num , pipes[num][0], False)))
+
+            for num in range(4):
+                processes[num].start()
+            
+            sleep(wait_time)
+            
+            stucked_proc = [processes.index(proc) for proc in processes if proc.is_alive()]
+            if len(stucked_proc) != 0: 
+                sleep(2.0)
+                for num in stucked_proc:
+                    if processes[num].is_alive():
+                        pipes[num][1].send("ping")
+
+            stucked_proc = [processes.index(proc) for proc in processes if proc.is_alive()]
+            if len(stucked_proc) != 0: 
+                sleep(2.0)
+
+                for num in stucked_proc:
+                    if processes[num].is_alive():
+                        processes[num].terminate()
+                        print(f"Killed from main type {num}")
+                        
+            
+            for num in range(4):
+                processes[num].join()
+            processes = []
+            pipes = []
+            base += 1
+            print("============")
+
+
+    database = sqlalchemy.create_engine("mysql+pymysql://python:123@localhost/vk_news")
 
     for new in news_parsed:
-        print(f"News num {new['id']}")
-        for num in range(4):
-            pipes.append(Pipe())
-            processes.append(Process(target=parse_news, args=(new, num, pipes[num][0], False)))
+        pics_string = ""
+        for pic in new['pics']: pics_string += pic
+        database.execute(f"INSERT INTO news (id, text, pics, url) VALUES ({new['id']}, '{new['text']}', '{pics_string}', '{new['url']}')")
 
-        for num in range(4):
-            processes[num].start()
-        
-        sleep(wait_time)
-        
-        stucked_proc = [processes.index(proc) for proc in processes if proc.is_alive()]
-        
-        if len(stucked_proc) != 0: 
-            sleep(2.0)
-
-            for num in stucked_proc:
-                if processes[num].is_alive():
-                    pipes[num][1].send("ping")
-        
-            sleep(4.0)
-
-            for num in stucked_proc:
-                if processes[num].is_alive():
-                    processes[num].terminate()
-                    print(f"Killed from main type {num}")
-                    
-        
-        for num in range(4):
-            processes[num].join()
-        processes = []
-        pipes = []
-
-
-"""
-TODO
-for new in news:
-    читаю аутпут после какого-то времени
-    если умерли, то перезапустить
-    читаю время и суммирую в 3 переменные 
-    каждый 5тый прогон менять их порядок в зависимости от времени отклика
-
-"""
