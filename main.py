@@ -1,31 +1,35 @@
 import vk_api
 from time import sleep
 import json
-from multiprocessing import Process, Queue, current_process
+from multiprocessing import Process, Pipe, current_process
 from threading import Thread
 import os.path
-from psutil import pid_exists
+import psutil
+import timeit
 
-def listener(type, qu, ppid):
-    if pid_exists(ppid):
-        print(f"Too long processing of type {type+1}")
+def listener(type, ppid,chld_pipe,isTest):
+    if psutil.pid_exists(ppid) and not isTest:
+        print(f"Listening of type {type}")
+        sleep(wait_time)
+        if chld_pipe.recv() == 'ping':
+            psutil.Process(pid=ppid).terminate()
+            print(f'Type {type} terminated by listener')
+            chld_pipe.close()
 
-    pass
-
-def parse_news(new: dict, type: int, qu: Queue):
-    listen = Process(target=listener, args=(type,qu,current_process().pid,))
+def parse_news(new: dict, type: int, chld_pipe, isTest):
+    listen = Process(target=listener, args=(type,current_process().pid,chld_pipe,isTest))
     listen.start()
 
     if type != 3:
         if type == 0:
             parsed_new = {'id' : new['id'], 'text' : new['text']}
-            current_process().name = 'Type 1'
+            current_process().name = 'Type 0'
         elif  type == 1:
             parsed_new = {'id' : new['id'], 'pics' : new['pics'], 'url' : new['url']}
-            current_process().name = 'Type 2'
+            current_process().name = 'Type 1'
         else:
             parsed_new = {'id' : new['id'], 'url' : new['url']}
-            current_process().name = 'Type 3'
+            current_process().name = 'Type 2'
         
         if not os.path.exists(f'./news_type{type}.json'):
             with open(f'./news_type{type}.json','w+') as a: pass
@@ -41,12 +45,15 @@ def parse_news(new: dict, type: int, qu: Queue):
 
         with open(f'./news_type{type}.json','w+') as news_json:
             news_json.write(json.dumps(temp, indent=1))
+        
+        if isTest:
+            os.remove(f'./news_type{type}.json')
     else:
-        sleep(3)
-        current_process().name = 'Type BAD'
+        sleep(300)
+        current_process().name = 'Type 3'
     
     listen.terminate()
-    print(f"pr end {current_process().name}")
+    if not isTest: print(f"pr end {current_process().name}")
     
     
     
@@ -88,25 +95,51 @@ if __name__ == "__main__":
 
     processes = []
     pids = []
-    queues = []
+    pipes = []
+
+    wait_time = 0.0
+    for num in range(3):
+        st = timeit.default_timer()
+        parse_news(news_parsed[0],num,True,True)
+        new_time = timeit.default_timer() - st
+        if wait_time == None:
+            wait_time = new_time
+        else:
+            if new_time > wait_time: wait_time = new_time
+
 
     for new in news_parsed:
         print(f"News num {new['id']}")
         for num in range(4):
-            queues.append(Queue())
-            processes.append(Process(target=parse_news, args=(new,num,queues[num])))
+            pipes.append(Pipe())
+            processes.append(Process(target=parse_news, args=(new, num, pipes[num][0], False)))
 
         for num in range(4):
             processes[num].start()
+        
+        sleep(wait_time)
+        
+        stucked_proc = [processes.index(proc) for proc in processes if proc.is_alive()]
+        
+        if len(stucked_proc) != 0: 
+            sleep(2.0)
 
+            for num in stucked_proc:
+                if processes[num].is_alive():
+                    pipes[num][1].send("ping")
+        
+            sleep(4.0)
 
-
-
-
+            for num in stucked_proc:
+                if processes[num].is_alive():
+                    processes[num].terminate()
+                    print(f"Killed from main type {num}")
+                    
+        
         for num in range(4):
             processes[num].join()
         processes = []
-        queues = []
+        pipes = []
 
 
 """
